@@ -16,7 +16,7 @@ import logging
 models_logger = logging.getLogger(__name__)
 
 from . import transforms, dynamics, utils, plot
-from .vit_sam import Transformer
+from .vit_sam import Transformer, DinoV3Transformer
 from .core import assign_device, run_net, run_3D
 
 _CPSAM_MODEL_URL = "https://huggingface.co/mouseland/cellpose-sam/resolve/main/cpsam"
@@ -24,7 +24,7 @@ _MODEL_DIR_ENV = os.environ.get("CELLPOSE_LOCAL_MODELS_PATH")
 _MODEL_DIR_DEFAULT = Path.home().joinpath(".cellpose", "models")
 MODEL_DIR = Path(_MODEL_DIR_ENV) if _MODEL_DIR_ENV else _MODEL_DIR_DEFAULT
 
-MODEL_NAMES = ["cpsam"]
+MODEL_NAMES = ["cpsam", "dinov3"]
 
 MODEL_LIST_PATH = os.fspath(MODEL_DIR.joinpath("gui_models.txt"))
 
@@ -88,8 +88,8 @@ class CellposeModel():
 
     """
 
-    def __init__(self, gpu=False, pretrained_model="cpsam", model_type=None,
-                 diam_mean=None, device=None, nchan=None, use_bfloat16=True):
+    def __init__(self, gpu=False, pretrained_model="cpsam", model_type=None, freeze_encoder=True,
+                 use_samneck=True, upsampler="simple", diam_mean=None, device=None, nchan=None, use_bfloat16=True):
         """
         Initialize the CellposeModel.
 
@@ -141,16 +141,22 @@ class CellposeModel():
 
         self.pretrained_model = pretrained_model
         dtype = torch.bfloat16 if use_bfloat16 else torch.float32
-        self.net = Transformer(dtype=dtype).to(self.device)
+        if "dino" in pretrained_model:
+            self.net = DinoV3Transformer(
+                backbone=pretrained_model,
+                upsampler=upsampler, use_samneck=use_samneck, 
+                freeze_encoder=freeze_encoder, dtype=dtype).to(self.device)
+        elif pretrained_model == "cpsam":
+            self.net = Transformer(dtype=dtype).to(self.device)
 
-        if os.path.exists(self.pretrained_model):
-            models_logger.info(f">>>> loading model {self.pretrained_model}")
-            self.net.load_model(self.pretrained_model, device=self.device)
-        else:
-            if os.path.split(self.pretrained_model)[-1] != 'cpsam':
-                raise FileNotFoundError('model file not recognized')
-            cache_CPSAM_model_path()
-            self.net.load_model(self.pretrained_model, device=self.device)
+        # if os.path.exists(self.pretrained_model):
+        #     models_logger.info(f">>>> loading model {self.pretrained_model}")
+        #     self.net.load_model(self.pretrained_model, device=self.device)
+        # else:
+        #     if os.path.split(self.pretrained_model)[-1] != 'cpsam':
+        #         raise FileNotFoundError('model file not recognized')
+        #     cache_CPSAM_model_path()
+        #     self.net.load_model(self.pretrained_model, device=self.device)
         
         
     def eval(self, x, batch_size=8, resample=True, channels=None, channel_axis=None,

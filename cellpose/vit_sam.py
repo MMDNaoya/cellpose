@@ -4,9 +4,160 @@ Copyright © 2025 Howard Hughes Medical Institute, Authored by Carsen Stringer a
 
 import torch
 from segment_anything import sam_model_registry
+from transformers import AutoImageProcessor, AutoModel
 torch.backends.cuda.matmul.allow_tf32 = True
 from torch import nn 
 import torch.nn.functional as F
+
+
+class UpSampler(nn.Module):
+    def __init__(self, in_dim, out_dim, upsampler, ):
+        super().__init__()
+        self.upsampler = upsampler
+        if upsampler == "simple":
+            self.net = UpSampleSimple(in_dim, out_dim)
+        elif upsampler == "anyup":
+            self.net = torch.hub.load('wimmerth/anyup', 'anyup')
+
+    def forward(self, x, image_orig):
+        # image_orig: imagenet正規化された画像テンソル (B, D, H, W)
+        if self.upsampler == "simple":
+            return self.net(x, image_orig.shape[2], image_orig.shape[3])
+        if self.upsampler == "anyup":
+            return self.net(x, image_orig)
+
+class UpSampleSimple(nn.Module):
+    """bilinear upsample + 1x1convolution"""
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.proj = nn.Conv2d(in_dim, out_dim, kernel_size=1)
+
+    def forward(self, x, H, W):
+        x = F.interpolate(
+            x,
+            size=(H, W),
+            mode="bilinear",
+            align_corners=False,
+        )
+        x = self.proj(x)  # (B, out_dim, H, W)
+        return x
+
+
+class LayerNorm2d(nn.Module):
+    def __init__(self, num_channels: int, eps: float = 1e-6) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(num_channels))
+        self.bias = nn.Parameter(torch.zeros(num_channels))
+        self.eps = eps
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        u = x.mean(1, keepdim=True)
+        s = (x - u).pow(2).mean(1, keepdim=True)
+        x = (x - u) / torch.sqrt(s + self.eps)
+        x = self.weight[:, None, None] * x + self.bias[:, None, None]
+        return x
+
+
+class SAMNeck(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.neck = nn.Sequential(
+            nn.Conv2d(dim, dim, kernel_size=1),
+            nn.GELU(),
+            nn.Conv2d(dim, dim, kernel_size=3, padding=1),
+            LayerNorm2d(dim, eps=1e-6)  # SAM
+        )
+
+    def forward(self, x):
+        return self.neck(x)
+
+
+class DinoV3Transformer(nn.Module):
+    def __init__(self, backbone="facebook/dinov3-vitl16-pretrain-lvd1689m",
+                  ps=8, nout=3, bsize=256, rdrop=0.4,
+                  upsampler="simple", use_samneck=True, freeze_encoder=True, dtype=torch.float32):
+        super(DinoV3Transformer, self).__init__()
+        assert "dino" in backbone
+        self.ps = ps
+        self.nout = nout
+        self.bsize = bsize
+        self.rdrop = rdrop
+
+        self.encoder = AutoModel.from_pretrained(backbone)
+        if freeze_encoder:
+            print("encoder is frozen")
+            for p in self.encoder.parameters():
+                p.requires_grad = False
+            self.encoder.eval()
+        else:
+            print("encoder is training")
+
+        nchan = self.encoder.config.hidden_size
+        self.upsampler = UpSampler(nchan, nchan, upsampler)
+        if use_samneck:
+            self.sam_neck = SAMNeck(nchan)
+            print('SAM Neck enabled')
+        else:
+            print('SAM Neck disabled')
+        self.out = nn.Conv2d(nchan, nout, kernel_size=1)
+
+        # average diameter of ROIs from training images from fine-tuning 
+        self.diam_labels = nn.Parameter(torch.tensor([30.]), requires_grad=False)
+        # average diameter of ROIs during main training
+        self.diam_mean = nn.Parameter(torch.tensor([30.]), requires_grad=False)
+
+        self.dtype = dtype
+        if self.dtype != torch.float32:
+            self = self.to(self.dtype)
+
+    def forward(self, x_orig):      
+        batch_size, n_channels, height, width = x_orig.shape
+        features = self.encoder(x_orig).last_hidden_state
+        dense_features = features[:, 5:, :].reshape(batch_size, height//16, width//16, 1024)
+        dense_features = dense_features.permute(0, 3, 1, 2)
+        x = self.upsampler(dense_features, x_orig)
+        # readout is changed here
+        if hasattr(self, "sam_neck"):
+            x = self.sam_neck(x)
+        x1 = self.out(x)
+        return x1, torch.zeros((x.shape[0], 256), device=x.device)
+    
+    def load_model(self, PATH, device, strict = False):
+        state_dict = torch.load(PATH, map_location = device, weights_only=True)
+        keys = [k for k in state_dict.keys()]
+
+        if keys[0][:7] == "module.":
+            from collections import OrderedDict
+            new_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                name = k[7:] # remove 'module.' of DataParallel/DistributedDataParallel
+                new_state_dict[name] = v
+            self.load_state_dict(new_state_dict, strict = strict)
+        else:
+            self.load_state_dict(state_dict, strict = strict)
+
+        if self.dtype != torch.float32:
+            self = self.to(self.dtype)
+
+    @property
+    def device(self):
+        """
+        Get the device of the model.
+
+        Returns:
+            torch.device: The device of the model.
+        """
+        return next(self.parameters()).device
+
+    def save_model(self, filename):
+        """
+        Save the model to a file.
+
+        Args:
+            filename (str): The path to the file where the model will be saved.
+        """
+        torch.save(self.state_dict(), filename)
+
 
 class Transformer(nn.Module):
     def __init__(self, backbone="vit_l", ps=8, nout=3, bsize=256, rdrop=0.4,
@@ -71,12 +222,10 @@ class Transformer(nn.Module):
             for blk in self.encoder.blocks:
                 x = blk(x)
 
-        x = self.encoder.neck(x.permute(0, 3, 1, 2))
-
+        x = self.encoder.neck(x.permute(0, 3, 1, 2)) #(B, 256, 32, 32)
         # readout is changed here
-        x1 = self.out(x)
-        x1 = F.conv_transpose2d(x1, self.W2, stride = self.ps, padding = 0)
-        
+        x1 = self.out(x) # (B, 192, 32, 32)
+        x1 = F.conv_transpose2d(x1, self.W2, stride = self.ps, padding = 0) # (B, 3, 256, 256)
         # maintain the second output of feature size 256 for backwards compatibility
            
         return x1, torch.zeros((x.shape[0], 256), device=x.device)
