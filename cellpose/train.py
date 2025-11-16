@@ -52,6 +52,11 @@ def _loss_fn_seg(lbl, y, device):
     loss = loss + loss2
     return loss
 
+def _loss_fn_bceonly(lbl, y, device):
+    criterion2 = nn.BCEWithLogitsLoss(reduction="mean")
+    loss2 = criterion2(y[:, -1], (lbl[:, -3] > 0.5).to(y.dtype))
+    return loss2
+
 def _reshape_norm(data, channel_axis=None, normalize_params={"normalize": False}):
     """
     Reshapes and normalizes the input data.
@@ -487,7 +492,6 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
         if iepoch == 5 or iepoch % 10 == 0:
             lavgt = 0.
             if test_data is not None or test_files is not None:
-                np.random.seed(42)
                 if nimg_test != nimg_test_per_epoch:
                     rperm = np.random.choice(np.arange(0, nimg_test),
                                              size=(nimg_test_per_epoch,), p=test_probs)
@@ -506,16 +510,17 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
                             len(diams), "float32")
                         imgi, lbl = random_rotate_and_resize(
                             imgs, Y=lbls, rescale=rsc, scale_range=scale_range,
-                            xy=(bsize, bsize))[:2]
+                            xy=(bsize, bsize), resize_only=True)[:2]
                         X = torch.from_numpy(imgi).to(device)
                         lbl = torch.from_numpy(lbl).to(device)
 
                         if X.dtype != net.dtype:
                             X = X.to(net.dtype)
                             lbl = lbl.to(net.dtype)
-                        
                         y = net(X)[0]
-                        loss = _loss_fn_seg(lbl, y, device)
+                        loss = _loss_fn_bceonly(lbl, y, device) 
+                        # 入力画像の拡大・縮小にほとんど変化しないBCELossのみ．
+                        # flowは拡大・縮小で大きく変わる．
                         if y.shape[1] > 3:
                             loss3 = _loss_fn_class(lbl, y, class_weights=class_weights)
                             loss += loss3            
