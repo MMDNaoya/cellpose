@@ -1,3 +1,4 @@
+import json
 import time
 import os
 import numpy as np
@@ -51,6 +52,11 @@ def _loss_fn_seg(lbl, y, device):
     loss2 = criterion2(y[:, -1], (lbl[:, -3] > 0.5).to(y.dtype))
     loss = loss + loss2
     return loss
+
+def _loss_fn_bceonly(lbl, y, device):
+    criterion2 = nn.BCEWithLogitsLoss(reduction="mean")
+    loss2 = criterion2(y[:, -1], (lbl[:, -3] > 0.5).to(y.dtype))
+    return loss2
 
 def _reshape_norm(data, channel_axis=None, normalize_params={"normalize": False}):
     """
@@ -305,12 +311,151 @@ def _process_train_test(train_data=None, train_labels=None, train_files=None,
             diam_train, test_data, test_labels, test_files, test_labels_files,
             test_probs, diam_test, normed)
 
+def lr_finder(model, 
+              train_data=None, train_labels=None, train_files=None,
+              train_labels_files=None, train_probs=None,
+              batch_size=1, encdoer_lr_multiplier=0,
+              n_steps=200, 
+              init_lr=1e-7, final_lr=1.0, 
+              channel_axis=None, compute_flows=False,
+              scale_range=None, bsize=256,
+              normalize=True, 
+              save_path="lr_finder_results.json",
+              **kwargs):
+    """
+    LR finder: linearly increases LR from init_lr to final_lr and records loss.
+    """
 
-def train_seg(net, train_data=None, train_labels=None, train_files=None,
+    print(">>> Starting LR finder...")
+    device = model.net.device
+    net = model.net
+
+    # ---------- Preprocessing (同じ train_seg 処理) ----------
+    if isinstance(normalize, dict):
+        normalize_params = {**models.normalize_default, **normalize}
+    elif not isinstance(normalize, bool):
+        raise ValueError("normalize must be bool or dict")
+    else:
+        normalize_params = models.normalize_default
+        normalize_params["normalize"] = normalize
+
+    out = _process_train_test(train_data=train_data, train_labels=train_labels,
+                              train_files=train_files, train_labels_files=train_labels_files,
+                              train_probs=train_probs,
+                              test_data=None, test_labels=None,
+                              test_files=None, test_labels_files=None,
+                              test_probs=None,
+                              load_files=True, min_train_masks=1,
+                              compute_flows=compute_flows, channel_axis=channel_axis,
+                              normalize_params=normalize_params, device=device)
+    (train_data, train_labels, train_files, train_labels_files, train_probs, diam_train,
+     _, _, _, _, _, _, normed) = out
+
+    if normed:
+        loader_kwargs = {}
+    else:
+        loader_kwargs = {"normalize_params": normalize_params, "channel_axis": channel_axis}
+
+    # --------- データサイズ ----------
+    nimg = len(train_data) if train_data is not None else len(train_files)
+    train_logger.info(f">>> LR finder data size = {nimg}")
+
+    # --------- LR Range Test の LR 設定 ----------
+    # 指数的に増加させる
+    mult = (final_lr / init_lr) ** (1 / n_steps)
+    current_lr = init_lr
+
+    # --------- optimizer param_groups ----------
+    encoder_params = [p for p in model.net.encoder.parameters() if p.requires_grad]
+    other_params = [p for name, p in model.net.named_parameters()
+                    if "encoder" not in name and p.requires_grad]
+
+    optimizer = torch.optim.AdamW(
+        [
+            {"params": encoder_params, "lr": current_lr * encdoer_lr_multiplier},
+            {"params": other_params,   "lr": current_lr},
+        ],
+        weight_decay=0.1
+    )
+
+    lrs = []
+    losses = []
+
+    net.train()
+    step_count = 0
+
+    # rperm を繰り返し使う
+    while step_count < n_steps:
+        rperm = np.random.permutation(np.arange(0, nimg))
+
+        for k in range(0, nimg, batch_size):
+
+            if step_count >= n_steps:
+                break
+
+            kend = min(k + batch_size, nimg)
+            inds = rperm[k:kend]
+
+            imgs, lbls = _get_batch(inds, data=train_data, labels=train_labels,
+                                    files=train_files, labels_files=train_labels_files,
+                                    **loader_kwargs)
+
+            diams = np.array([diam_train[i] for i in inds])
+            rsc = diams / net.diam_mean.item() if False else np.ones(len(diams), "float32")
+
+            # augment
+            imgi, lbl = random_rotate_and_resize(imgs, Y=lbls, rescale=rsc,
+                                                 scale_range=scale_range,
+                                                 xy=(bsize, bsize))[:2]
+
+            X = torch.from_numpy(imgi).to(device)
+            lbl = torch.from_numpy(lbl).to(device)
+            if X.dtype != net.dtype:
+                X = X.to(net.dtype)
+                lbl = lbl.to(net.dtype)
+
+            # ----- forward -----
+            y = net(X)[0]
+            loss = _loss_fn_seg(lbl, y, device)
+            if y.shape[1] > 3:
+                loss = loss + _loss_fn_class(lbl, y)
+
+            # ----- backward -----
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            # ----- 記録 -----
+            lrs.append(current_lr)
+            losses.append(loss.item())
+
+            print(f"[{step_count+1}/{n_steps}] lr={current_lr:.3e}, loss={loss.item():.4f}")
+
+            # ----- LR を指数的に増加 -----
+            current_lr *= mult
+            optimizer.param_groups[0]["lr"] = current_lr * encdoer_lr_multiplier
+            optimizer.param_groups[1]["lr"] = current_lr
+            step_count += 1
+            if step_count >= n_steps:
+                break
+
+    # -------- Save JSON result --------
+    record = {
+        "args": kwargs,
+        "lrs": lrs,
+        "losses": losses,
+    }
+    with open(save_path, "w") as f:
+        json.dump(record, f, indent=2)
+    print(f">>> LR finder finished. Saved JSON to {save_path}")
+    return lrs, losses
+
+def train_seg(model, train_data=None, train_labels=None, train_files=None,
               train_labels_files=None, train_probs=None, test_data=None,
               test_labels=None, test_files=None, test_labels_files=None,
               test_probs=None, channel_axis=None,
-              load_files=True, batch_size=1, learning_rate=1e-5, SGD=False,
+              load_files=True, batch_size=1, learning_rate=1e-5, encoder_lr_multiplier=0,
+              SGD=False,
               n_epochs=100, weight_decay=0.1, normalize=True, compute_flows=False,
               save_path=None, save_every=100, save_each=False, nimg_per_epoch=None,
               nimg_test_per_epoch=None, rescale=False, scale_range=None, bsize=256,
@@ -353,7 +498,7 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
     """
     if SGD:
         train_logger.warning("SGD is deprecated, using AdamW instead")
-
+    net = model.net
     device = net.device
 
     original_net_dtype = None
@@ -364,7 +509,7 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
         net.dtype = torch.float32
         net.to(torch.float32)
 
-    scale_range = 0.5 if scale_range is None else scale_range
+    scale_range = 0 if scale_range is None else scale_range
 
     if isinstance(normalize, dict):
         normalize_params = {**models.normalize_default, **normalize}
@@ -420,8 +565,31 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
     train_logger.info(
         f">>> AdamW, learning_rate={learning_rate:0.5f}, weight_decay={weight_decay:0.5f}"
     )
-    optimizer = torch.optim.AdamW(net.parameters(), lr=learning_rate,
-                                    weight_decay=weight_decay)
+
+    if encoder_lr_multiplier == 0:
+        for p in model.net.encoder.parameters():
+            p.requires_grad = False
+    wd_encoder = 0 if encoder_lr_multiplier == 0 else 1e-5
+    wd_other   = 1e-2
+    param_groups = [
+        # --- encoder ---
+        {
+            "params": [p for p in model.net.encoder.parameters() if p.requires_grad],
+            "lr": learning_rate * encoder_lr_multiplier,
+            "weight_decay": wd_encoder,
+        },
+
+        # --- その他（SAM Neck, UpSampler, Head など） ---
+        {
+            "params": [
+                p for name, p in model.net.named_parameters()
+                if ("encoder" not in name) and p.requires_grad
+            ],
+            "lr": learning_rate,
+            "weight_decay": wd_other,
+        }
+    ]
+    optimizer = torch.optim.AdamW(param_groups)
 
     t0 = time.time()
     model_name = f"cellpose_{t0}" if model_name is None else model_name
@@ -442,8 +610,10 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
         else:
             # otherwise use all images
             rperm = np.random.permutation(np.arange(0, nimg))
-        for param_group in optimizer.param_groups:
-            param_group["lr"] = LR[iepoch] # set learning rate
+
+        current_lr = LR[iepoch]
+        optimizer.param_groups[0]["lr"] = current_lr * encoder_lr_multiplier
+        optimizer.param_groups[1]["lr"] = current_lr
         net.train()
         for k in range(0, nimg_per_epoch, batch_size):
             kend = min(k + batch_size, nimg_per_epoch)
@@ -465,7 +635,6 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
             if X.dtype != net.dtype:
                 X = X.to(net.dtype)
                 lbl = lbl.to(net.dtype)
-
             y = net(X)[0]
             loss = _loss_fn_seg(lbl, y, device)
             if y.shape[1] > 3:
@@ -484,10 +653,11 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
             train_losses[iepoch] += train_loss
         train_losses[iepoch] /= nimg_per_epoch
 
-        if iepoch == 5 or iepoch % 10 == 0:
+        # Evaluation start
+        if iepoch == n_epochs - 1 or (iepoch % save_every == 0 and iepoch != 0):
+#        if iepoch == 5 or iepoch % 10 == 0:
             lavgt = 0.
             if test_data is not None or test_files is not None:
-                np.random.seed(42)
                 if nimg_test != nimg_test_per_epoch:
                     rperm = np.random.choice(np.arange(0, nimg_test),
                                              size=(nimg_test_per_epoch,), p=test_probs)
@@ -506,16 +676,17 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
                             len(diams), "float32")
                         imgi, lbl = random_rotate_and_resize(
                             imgs, Y=lbls, rescale=rsc, scale_range=scale_range,
-                            xy=(bsize, bsize))[:2]
+                            xy=(bsize, bsize), resize_only=True)[:2]
                         X = torch.from_numpy(imgi).to(device)
                         lbl = torch.from_numpy(lbl).to(device)
 
                         if X.dtype != net.dtype:
                             X = X.to(net.dtype)
                             lbl = lbl.to(net.dtype)
-                        
                         y = net(X)[0]
-                        loss = _loss_fn_seg(lbl, y, device)
+                        loss = _loss_fn_bceonly(lbl, y, device) 
+                        # 入力画像の拡大・縮小にほとんど変化しないBCELossのみ．
+                        # flowは拡大・縮小で大きく変わる．
                         if y.shape[1] > 3:
                             loss3 = _loss_fn_class(lbl, y, class_weights=class_weights)
                             loss += loss3            

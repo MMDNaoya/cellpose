@@ -927,7 +927,7 @@ def pad_image_ND(img0, div=16, extra=1, min_size=None, zpad=False):
 
 def random_rotate_and_resize(X, Y=None, scale_range=1., xy=(224, 224), do_3D=False,
                              zcrop=48, do_flip=True, rotate=True, rescale=None, unet=False,
-                             random_per_image=True):
+                             random_per_image=True, resize_only=False):
     """Augmentation by random rotation and resizing.
 
     Args:
@@ -973,7 +973,26 @@ def random_rotate_and_resize(X, Y=None, scale_range=1., xy=(224, 224), do_3D=Fal
     scale = np.ones(nimg, np.float32)
 
     for n in range(nimg):
+        if resize_only:
+            # simple resize for X
+            for k in range(nchan):
+                imgi[n, k] = cv2.resize(
+                    X[n][k],
+                    (xy[1], xy[0]),
+                    interpolation=cv2.INTER_LINEAR
+                )
 
+            # simple resize for Y
+            if Y is not None:
+                for k in range(nt):
+                    flag = cv2.INTER_NEAREST if k < nt-2 else cv2.INTER_LINEAR
+                    lbl[n, k] = cv2.resize(
+                        Y[n][k].copy(),
+                        (xy[1], xy[0]),
+                        interpolation=flag
+                    )
+            scale[n] = 1.0
+            continue
         if random_per_image or n == 0:
             Ly, Lx = X[n].shape[-2:]
             # generate random augmentation parameters

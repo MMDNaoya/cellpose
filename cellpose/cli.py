@@ -83,6 +83,9 @@ def get_arg_parser():
     model_args.add_argument(
         "--transformer", action="store_true", help=
         "use transformer backbone (pretrained_model from Cellpose3 is transformer_cp3)")
+    model_args.add_argument("--encoder_lr_multiplier", type=float, default=0)
+    model_args.add_argument("--use_samneck", action="store_true")
+    model_args.add_argument("--upsampler", default="simple")
     
     # algorithm settings
     algorithm_args = parser.add_argument_group("Algorithm Arguments")
@@ -139,7 +142,8 @@ def get_arg_parser():
     algorithm_args.add_argument(
         "--no_interp", action="store_true",
         help="do not interpolate when running dynamics (was default)")
-
+    algorithm_args.add_argument(
+        "--find_lr_only", action="store_true")
     # output settings
     output_args = parser.add_argument_group("Output Arguments")
     output_args.add_argument(
