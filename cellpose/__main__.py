@@ -179,6 +179,7 @@ def _train_cellposemodel_cli(args, logger, image_filter, device, pretrained_mode
         logger.info(">>>> lr finder successfully completed.")
         exit()
 
+    
     # train segmentation model
     cpmodel_path = train.train_seg(
             model, images, labels, train_files=image_names,
