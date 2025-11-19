@@ -33,15 +33,18 @@ class UpSampleSimple(nn.Module):
         self.proj = nn.Conv2d(in_dim, out_dim, kernel_size=1)
 
     def forward(self, x, H, W):
-        x = F.interpolate(
-            x,
-            size=(H, W),
-            mode="bilinear",
-            align_corners=False,
+        x1, x2, x3 = x.tensor_split(3, dim=0)
+        x1, x2, x3 = map(
+            lambda x_: F.interpolate(x_, size=(H, W), mode="bilinear", align_corners=False),
+            (x1, x2, x3)
         )
+        # bilinear upsampleのINT_MAX制限から一旦splitしてconcat.
+        # 入力画像サイズ384，vit-l (特徴量次元1024次元)のときは，(14 * 1024 * 384 * 384 < 2^31-1)でギリギリ入る．
+        # よってtrain_batch_size 43以上のときは分割を多くする．
+        # 通常batch sizeは16が性能低下を起こさない下限とされ，16であれば入力画像サイズがもう少し大きくても良い．
+        x = torch.cat([x1, x2, x3], dim=0)
         x = self.proj(x)  # (B, out_dim, H, W)
         return x
-
 
 class LayerNorm2d(nn.Module):
     def __init__(self, num_channels: int, eps: float = 1e-6) -> None:
@@ -113,7 +116,7 @@ class DinoV3Transformer(nn.Module):
     def forward(self, x_orig):      
         batch_size, n_channels, height, width = x_orig.shape
         features = self.encoder(x_orig).last_hidden_state
-        dense_features = features[:, 5:, :].reshape(batch_size, height//16, width//16, 1024)
+        dense_features = features[:, 5:, :].reshape(batch_size, height//16, width//16, features.shape[-1])
         dense_features = dense_features.permute(0, 3, 1, 2)
         x = self.upsampler(dense_features, x_orig)
         # readout is changed here

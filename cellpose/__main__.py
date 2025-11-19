@@ -155,6 +155,30 @@ def _train_cellposemodel_cli(args, logger, image_filter, device, pretrained_mode
         upsampler=args.upsampler,
         use_samneck=args.use_samneck,
         freeze_encoder=freeze_encoder)
+
+    if args.find_lr_only:
+        train.lr_finder(
+            model, images, labels, train_files=image_names,
+            test_data=test_images, test_labels=test_labels,
+            test_files=image_names_test, train_probs=train_probs,
+            test_probs=test_probs, compute_flows=compute_flows,
+            load_files=load_files, normalize=normalize,
+            channel_axis=args.channel_axis, 
+            learning_rate=args.learning_rate, 
+            encoder_lr_multiplier=args.encoder_lr_multiplier,
+            weight_decay=args.weight_decay,
+            SGD=args.SGD, n_epochs=args.n_epochs, batch_size=args.train_batch_size,
+            min_train_masks=args.min_train_masks,
+            nimg_per_epoch=args.nimg_per_epoch,
+            nimg_test_per_epoch=args.nimg_test_per_epoch,
+            bsize=args.bsize,
+            save_path=os.path.realpath(args.dir), 
+            save_every=args.save_every,
+            save_each=args.save_each,
+            model_name=args.model_name_out, kw_args=args)
+        logger.info(">>>> lr finder successfully completed.")
+        exit()
+
     
     # train segmentation model
     cpmodel_path = train.train_seg(

@@ -131,13 +131,6 @@ class CellposeModel():
             model_strings = get_user_models()
             all_models = MODEL_NAMES.copy()
             all_models.extend(model_strings)
-            if pretrained_model in all_models:
-                pretrained_model = os.path.join(MODEL_DIR, pretrained_model)
-            else:
-                pretrained_model = os.path.join(MODEL_DIR, "cpsam")
-                models_logger.warning(
-                    f"pretrained model {pretrained_model} not found, using default model"
-                )
 
         self.pretrained_model = pretrained_model
         dtype = torch.bfloat16 if use_bfloat16 else torch.float32

@@ -142,7 +142,8 @@ def get_arg_parser():
     algorithm_args.add_argument(
         "--no_interp", action="store_true",
         help="do not interpolate when running dynamics (was default)")
-
+    algorithm_args.add_argument(
+        "--find_lr_only", action="store_true")
     # output settings
     output_args = parser.add_argument_group("Output Arguments")
     output_args.add_argument(
