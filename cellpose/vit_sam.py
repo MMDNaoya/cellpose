@@ -85,8 +85,13 @@ class DinoV3Transformer(nn.Module):
         self.nout = nout
         self.bsize = bsize
         self.rdrop = rdrop
+        self.is_convnext = "convnext" in backbone
 
         self.encoder = AutoModel.from_pretrained(backbone)
+        if self.is_convnext:
+            nchan = self.encoder.config.hidden_sizes[-1]
+        else:
+            nchan = self.encoder.config.hidden_size
         if freeze_encoder:
             print("encoder is frozen")
             for p in self.encoder.parameters():
@@ -95,7 +100,6 @@ class DinoV3Transformer(nn.Module):
         else:
             print("encoder is training")
 
-        nchan = self.encoder.config.hidden_size
         self.upsampler = UpSampler(nchan, nchan, upsampler)
         if use_samneck:
             self.sam_neck = SAMNeck(nchan)
@@ -113,11 +117,14 @@ class DinoV3Transformer(nn.Module):
         if self.dtype != torch.float32:
             self = self.to(self.dtype)
 
-    def forward(self, x_orig):      
+    def forward(self, x_orig):
         batch_size, n_channels, height, width = x_orig.shape
-        features = self.encoder(x_orig).last_hidden_state
-        dense_features = features[:, 5:, :].reshape(batch_size, height//16, width//16, features.shape[-1])
-        dense_features = dense_features.permute(0, 3, 1, 2)
+        if self.is_convnext:
+            dense_features = self.encoder(x_orig, output_hidden_states=True).hidden_states[4]
+        else:
+            features = self.encoder(x_orig).last_hidden_state
+            dense_features = features[:, 5:, :].reshape(batch_size, height//16, width//16, features.shape[-1])
+            dense_features = dense_features.permute(0, 3, 1, 2)
         x = self.upsampler(dense_features, x_orig)
         # readout is changed here
         if hasattr(self, "sam_neck"):
