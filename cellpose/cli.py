@@ -201,6 +201,11 @@ def get_arg_parser():
         "--mask_filter", default="_masks", type=str, help=
         "end string for masks to run on. use '_seg.npy' for manual annotations from the GUI. Default: %(default)s"
     )
+    training_args.add_argument(
+        "--oneout_cv", action="store_true", help=
+        "pick one of training images to use as test data."
+    )
+    training_args.add_argument("--fold", type=int, default=0)
     training_args.add_argument("--learning_rate", default=1e-5, type=float,
                                help="learning rate. Default: %(default)s")
     training_args.add_argument("--weight_decay", default=0.1, type=float,

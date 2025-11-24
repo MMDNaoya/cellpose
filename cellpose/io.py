@@ -457,6 +457,28 @@ def get_label_files(image_names, mask_filter, imf=None):
 
     return label_names, flow_names
 
+def gather_images_labels(image_names, label_names, flow_names):
+    nimg = len(image_names)
+    images = []
+    labels = []
+    k = 0
+    for n in range(nimg):
+        if (os.path.isfile(label_names[n]) or
+            (flow_names is not None and os.path.isfile(flow_names[0]))):
+            image = imread(image_names[n])
+            if label_names is not None:
+                label = imread(label_names[n])
+            if flow_names is not None:
+                flow = imread(flow_names[n])
+                if flow.shape[0] < 4:
+                    label = np.concatenate((label[np.newaxis, :, :], flow), axis=0)
+                else:
+                    label = flow
+            images.append(image)
+            labels.append(label)
+            k += 1
+    return images, labels, k, nimg
+
 
 def load_images_labels(tdir, mask_filter="_masks", image_filter=None,
                        look_one_level_down=False):
@@ -478,27 +500,44 @@ def load_images_labels(tdir, mask_filter="_masks", image_filter=None,
     # training data
     label_names, flow_names = get_label_files(image_names, mask_filter,
                                               imf=image_filter)
-
-    images = []
-    labels = []
-    k = 0
-    for n in range(nimg):
-        if (os.path.isfile(label_names[n]) or
-            (flow_names is not None and os.path.isfile(flow_names[0]))):
-            image = imread(image_names[n])
-            if label_names is not None:
-                label = imread(label_names[n])
-            if flow_names is not None:
-                flow = imread(flow_names[n])
-                if flow.shape[0] < 4:
-                    label = np.concatenate((label[np.newaxis, :, :], flow), axis=0)
-                else:
-                    label = flow
-            images.append(image)
-            labels.append(label)
-            k += 1
+    images, labels, nimg, k = gather_images_labels(image_names, label_names, flow_names)
     io_logger.info(f"{k} / {nimg} images in {tdir} folder have labels")
     return images, labels, image_names
+
+
+def load_images_labels_oneout_v(tdir, mask_filter="_masks", image_filter=None, look_one_level_down=False, fold=0):
+    """
+    Loads images and corresponding labels from a directory.
+
+    Args:
+        tdir (str): The directory path.
+        mask_filter (str, optional): The filter for mask files. Defaults to "_masks".
+        image_filter (str, optional): The filter for image files. Defaults to None.
+        look_one_level_down (bool, optional): Whether to look for files one level down. Defaults to False.
+
+    Returns:
+        tuple: A tuple containing a list of images, a list of labels, and a list of image names.
+    """
+
+    image_names = get_image_files(tdir, mask_filter, image_filter, look_one_level_down)
+    source_image_names = sorted(np.unique([name.split(' [')[0] for name in image_names]))
+    print("len(source_image_names)", len(source_image_names))
+    assert len(source_image_names) == 8
+    test_source_image_name = source_image_names[fold]
+    
+    test_image_names = [name for name in image_names if test_source_image_name in name]
+    train_image_names = [name for name in image_names if name not in test_image_names]
+
+    train_label_names, train_flow_names = get_label_files(train_image_names, mask_filter, image_filter)
+    test_label_names, test_flow_names = get_label_files(test_image_names, mask_filter, image_filter)
+
+    train_images, train_labels, train_nimg, train_k = gather_images_labels(
+        train_image_names, train_label_names, train_flow_names)
+    test_images, test_labels, test_nimg, test_k = gather_images_labels(
+        test_image_names, test_label_names, test_flow_names)
+    io_logger.info(f"{train_k} / {train_nimg} images in {tdir} folder have labels, {fold} th fold training data")
+    io_logger.info(f"{test_k} / {test_nimg} images in {tdir} folder have labels, {fold} th fold test data")
+    return train_images, train_labels, train_image_names, test_images, test_labels, test_image_names
 
 def load_train_test_data(train_dir, test_dir=None, image_filter=None,
                          mask_filter="_masks", look_one_level_down=False):

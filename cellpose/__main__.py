@@ -141,12 +141,18 @@ def _train_cellposemodel_cli(args, logger, image_filter, device, pretrained_mode
             load_files = False
         else:
             logger.critical(f"ERROR: {args.file_list} does not exist")
+    if args.oneout_cv:
+        output = io.load_images_labels_oneout_v(args.dir, image_filter=image_filter,
+                                                mask_filter=args.mask_filter,
+                                                look_one_level_down=args.look_one_level_down,
+                                                fold=args.fold)
+        
     else:
         output = io.load_train_test_data(args.dir, test_dir, image_filter,
                                                 args.mask_filter,
                                                 args.look_one_level_down)
-        images, labels, image_names, test_images, test_labels, image_names_test = output
-        load_files = True
+    images, labels, image_names, test_images, test_labels, image_names_test = output
+    load_files = True
 
     # initialize model
     freeze_encoder = args.encoder_lr_multiplier <= 0
