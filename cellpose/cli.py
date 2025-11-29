@@ -86,6 +86,7 @@ def get_arg_parser():
     model_args.add_argument("--encoder_lr_multiplier", type=float, default=0)
     model_args.add_argument("--use_samneck", action="store_true")
     model_args.add_argument("--upsampler", default="simple")
+    model_args.add_argument("--weight_path", default="")
     
     # algorithm settings
     algorithm_args = parser.add_argument_group("Algorithm Arguments")

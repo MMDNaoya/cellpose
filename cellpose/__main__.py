@@ -4,6 +4,7 @@ Copyright © 2025 Howard Hughes Medical Institute, Authored by Carsen Stringer ,
 import os, time
 import numpy as np
 from tqdm import tqdm
+import torch
 from cellpose import utils, models, io, train
 from .version import version_str
 from cellpose.cli import get_arg_parser
@@ -115,17 +116,19 @@ def main():
 
     if len(args.image_path) > 0 and args.train:
         raise ValueError("ERROR: cannot train model with single image input")
-
+    weight_path = args.weight_path
     ## Run evaluation on images
     if not args.train:
-        _evaluate_cellposemodel_cli(args, logger, image_filter, device, pretrained_model, normalize)
+        _evaluate_cellposemodel_cli(
+            args, logger, image_filter, device, pretrained_model, normalize, weight_path)
     
     ## Train a model ##
     else:
-        _train_cellposemodel_cli(args, logger, image_filter, device, pretrained_model, normalize)
+        _train_cellposemodel_cli(
+            args, logger, image_filter, device, pretrained_model, normalize, weight_path)
 
 
-def _train_cellposemodel_cli(args, logger, image_filter, device, pretrained_model, normalize):
+def _train_cellposemodel_cli(args, logger, image_filter, device, pretrained_model, normalize, weight_path):
     test_dir = None if len(args.test_dir) == 0 else args.test_dir
     images, labels, image_names, train_probs = None, None, None, None
     test_images, test_labels, image_names_test, test_probs = None, None, None, None
@@ -161,6 +164,9 @@ def _train_cellposemodel_cli(args, logger, image_filter, device, pretrained_mode
         upsampler=args.upsampler,
         use_samneck=args.use_samneck,
         freeze_encoder=freeze_encoder)
+    
+    if len(weight_path) > 0:
+        model.net.load_state_dict(torch.load(weight_path))
 
     if args.find_lr_only:
         train.lr_finder(
@@ -211,7 +217,7 @@ def _train_cellposemodel_cli(args, logger, image_filter, device, pretrained_mode
     return model
 
 
-def _evaluate_cellposemodel_cli(args, logger, imf, device, pretrained_model, normalize):
+def _evaluate_cellposemodel_cli(args, logger, imf, device, pretrained_model, normalize, weight_path):
     # Check with user if they REALLY mean to run without saving anything
     if not args.train:
         saving_something = args.save_png or args.save_tif or args.save_flows or args.save_txt
@@ -237,7 +243,8 @@ def _evaluate_cellposemodel_cli(args, logger, imf, device, pretrained_model, nor
 
     # handle built-in model exceptions
     model = models.CellposeModel(device=device, pretrained_model=pretrained_model,)
-
+    if len(weight_path) > 0:
+        model.net.load_state_dict(torch.load(weight_path))
     tqdm_out = utils.TqdmToLogger(logger, level=logging.INFO)
 
     channel_axis = args.channel_axis
@@ -277,6 +284,7 @@ def _evaluate_cellposemodel_cli(args, logger, imf, device, pretrained_model, nor
                 anisotropy=args.anisotropy, 
                 niter=args.niter,
                 flow3D_smooth=args.flow3D_smooth)
+        #masks, [plot.dx_to_circ(dP), dP, cellprob], styles
         masks, flows = out[:2]
 
         if args.exclude_on_edges:
