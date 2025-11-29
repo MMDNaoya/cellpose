@@ -550,16 +550,11 @@ def train_seg(model, train_data=None, train_labels=None, train_files=None,
     nimg_test_per_epoch = nimg_test if nimg_test_per_epoch is None else nimg_test_per_epoch
 
     # learning rate schedule
-    LR = np.linspace(0, learning_rate, 10)
-    LR = np.append(LR, learning_rate * np.ones(max(0, n_epochs - 10)))
-    if n_epochs > 300:
-        LR = LR[:-100]
-        for i in range(10):
-            LR = np.append(LR, LR[-1] / 2 * np.ones(10))
-    elif n_epochs > 99:
-        LR = LR[:-50]
-        for i in range(10):
-            LR = np.append(LR, LR[-1] / 2 * np.ones(5))
+    # first 5 epochs: linear warmup
+    # last 5 epochs: linear decay
+    LR = np.ones(n_epochs) * learning_rate
+    LR[:5] = np.linspace(learning_rate*0.01, learning_rate, 5)
+    LR[-5:] = np.linspace(learning_rate, learning_rate*0.01)
 
     train_logger.info(f">>> n_epochs={n_epochs}, n_train={nimg}, n_test={nimg_test}")
     train_logger.info(
