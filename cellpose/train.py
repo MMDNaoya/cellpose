@@ -587,7 +587,7 @@ def train_seg(model, train_data=None, train_labels=None, train_files=None,
     optimizer = torch.optim.AdamW(param_groups)
 
     t0 = time.time()
-    model_name = f"cellpose_{t0}" if model_name is None else model_name
+    model_name = f"cellpose_{model_name}_{t0}"
     save_path = Path.cwd() if save_path is None else Path(save_path)
     filename = save_path / "models" / model_name
     (save_path / "models").mkdir(exist_ok=True)

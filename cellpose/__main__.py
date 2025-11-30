@@ -187,7 +187,7 @@ def _train_cellposemodel_cli(args, logger, image_filter, device, model_name, pre
             save_path=os.path.realpath(args.dir), 
             save_every=args.save_every,
             save_each=args.save_each,
-            model_name=args.model_name_out, kw_args=args)
+            model_name=model_name, kw_args=args)
         logger.info(">>>> lr finder successfully completed.")
         exit()
 
@@ -211,7 +211,7 @@ def _train_cellposemodel_cli(args, logger, image_filter, device, model_name, pre
             save_path=os.path.realpath(args.dir), 
             save_every=args.save_every,
             save_each=args.save_each,
-            model_name=args.model_name_out)[0]
+            model_name=model_name)[0]
     model.pretrained_model = cpmodel_path
     logger.info(">>>> model trained and saved to %s" % cpmodel_path)
     return model
