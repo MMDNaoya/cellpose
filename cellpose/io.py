@@ -805,11 +805,13 @@ def save_masks(images, masks, flows, file_names, png=True, tif=False, channels=[
     if tif:
         exts.append(".tif")
 
+    masks_bin = (masks > 0).astype(np.uint8)
     # save masks
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         for ext in exts:
             imsave(os.path.join(maskdir, basename + suffix + ext), masks)
+            imsave(os.path.join(maskdir, basename + suffix + '_bin_' + ext), 255*masks_bin)
 
     if save_mpl and png and MATPLOTLIB and not min(images.shape) > 3:
         # Make and save original/segmentation/flows image
