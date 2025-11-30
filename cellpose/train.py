@@ -536,8 +536,6 @@ def train_seg(model, train_data=None, train_labels=None, train_files=None,
         kwargs = {}
     else:
         kwargs = {"normalize_params": normalize_params, "channel_axis": channel_axis}
-    
-    net.diam_labels.data = torch.Tensor([diam_train.mean()]).to(device)
 
     if class_weights is not None and isinstance(class_weights, (list, np.ndarray, tuple)):
         class_weights = torch.from_numpy(class_weights).to(device).float()
@@ -575,7 +573,7 @@ def train_seg(model, train_data=None, train_labels=None, train_files=None,
     elif model_name == "DinoV3Transformer":
         encoder_params = list(model.net.encoder.parameters())
     else:
-        raise ValueError(f"invalid model_name {model_name}")
+        encoder_params = list(model.net.net.encoder.parameters())
     encoder_param_ids = {id(p) for p in encoder_params}
     param_groups = [
         {

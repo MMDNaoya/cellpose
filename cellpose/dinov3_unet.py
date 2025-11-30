@@ -365,7 +365,7 @@ class DinoV3CNNOnlyUnet(nn.Module):
 
         # ConvNeXt Tiny (DINOv3 convnext tiny) を想定した Encoder 側のチャネル数
         #   C0: 96, C1: 192, C2: 384, C3: 768
-        self.encoder_channels = [96, 192, 384, 768]
+        self.encoder_channels = self.backbone.config.hidden_sizes
 
         # Decoder 側のチャネル数
         if decoder_channels is None:

@@ -10,6 +10,8 @@ import torch
 from scipy.ndimage import gaussian_filter
 import gc
 import cv2
+import segmentation_models_pytorch as smp
+import torch.nn as nn
 
 import logging
 
@@ -63,6 +65,35 @@ def get_user_models():
             if len(lines) > 0:
                 model_strings.extend(lines)
     return model_strings
+
+
+class SMPWrapper(nn.Module):
+    def __init__(self, arch, encoder_name, in_channels, classes, dtype):
+        super().__init__()
+        self.dtype = dtype
+        self.net = smp.create_model(arch=arch, encoder_name=encoder_name, in_channels=in_channels, classes=classes)
+
+    def forward(self, x):
+        return self.net(x), 0
+    
+    @property
+    def device(self):
+        """
+        Get the device of the model.
+
+        Returns:
+            torch.device: The device of the model.
+        """
+        return next(self.parameters()).device
+
+    def save_model(self, filename):
+        """
+        Save the model to a file.
+
+        Args:
+            filename (str): The path to the file where the model will be saved.
+        """
+        torch.save(self.state_dict(), filename)
 
 
 class CellposeModel():
@@ -149,10 +180,14 @@ class CellposeModel():
             self.net = DinoV3CNNOnlyUnet(
                 backbone=backbone,
                 freeze_backbone=freeze_encoder, dtype=dtype).to(self.device)
-        elif "cpsam" == model_name:
-            self.net = Transformer(dtype=dtype).to(self.device)
         else:
-            raise ValueError(f"invalid model name {model_name}")
+            self.net = SMPWrapper(
+                arch=model_name,
+                encoder_name=backbone['cnn'],
+                in_channels=3,
+                classes=3,
+                dtype=dtype,
+            ).to(self.device)
 
         # if os.path.exists(self.pretrained_model):
         #     models_logger.info(f">>>> loading model {self.pretrained_model}")
