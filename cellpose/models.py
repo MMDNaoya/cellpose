@@ -89,8 +89,8 @@ class CellposeModel():
 
     """
 
-    def __init__(self, gpu=False, model_name="DinoV3Transformer", pretrained_model="cpsam", model_type=None, freeze_encoder=True,
-                 use_samneck=True, upsampler="simple", diam_mean=None, device=None, nchan=None, use_bfloat16=True):
+    def __init__(self, gpu=False, model_name="DinoV3Transformer", backbone=None, pretrained_model="cpsam", model_type=None, freeze_encoder=True,
+                 use_samneck=True, upsampler="simple", diam_mean=None, device=None, nchan=None):
         """
         Initialize the CellposeModel.
 
@@ -134,25 +134,25 @@ class CellposeModel():
             all_models.extend(model_strings)
 
         self.pretrained_model = pretrained_model
-        dtype = torch.bfloat16 if use_bfloat16 else torch.float32
+        dtype = torch.float32
 
         if "DinoV3Transformer" == model_name:
             self.net = DinoV3Transformer(
-                backbone=pretrained_model,
+                backbone=backbone,
                 upsampler=upsampler, use_samneck=use_samneck, 
                 freeze_encoder=freeze_encoder, dtype=dtype).to(self.device)
         elif "DinoV3VitCNNUnet" == model_name:
             self.net = DinoV3VitCNNUnet(
-                backbone=pretrained_model,
-                upsampler=upsampler,
-                freeze_encoder=freeze_encoder, dtype=dtype).to(self.device)
+                backbone=backbone,
+                freeze_backbone=freeze_encoder, dtype=dtype).to(self.device)
         elif "DinoV3CNNOnlyUnet" == model_name:
             self.net = DinoV3CNNOnlyUnet(
-                backbone=pretrained_model,
-                upsampler=upsampler,
-                freeze_encoder=freeze_encoder, dtype=dtype).to(self.device)
+                backbone=backbone,
+                freeze_backbone=freeze_encoder, dtype=dtype).to(self.device)
         elif "cpsam" == model_name:
             self.net = Transformer(dtype=dtype).to(self.device)
+        else:
+            raise ValueError(f"invalid model name {model_name}")
 
         # if os.path.exists(self.pretrained_model):
         #     models_logger.info(f">>>> loading model {self.pretrained_model}")

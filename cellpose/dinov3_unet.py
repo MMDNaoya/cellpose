@@ -144,13 +144,12 @@ class DinoV3VitCNNUnet(nn.Module):
 
     def __init__(
         self,
-        backbone_vit: str = "facebook/dinov3-vits16-pretrain-lvd1689m",
-        backbone_cnn: str = "facebook/dinov3-convnext-tiny-pretrain-lvd1689m",
+        backbone,
         ps: int = 8,
         nout: int = 3,
         bsize: int = 256,
         rdrop: float = 0.4,
-        freeze_encoder: bool = True,
+        freeze_backbone: bool = True,
         dtype: torch.dtype = torch.float32,
     ) -> None:
         super().__init__()
@@ -162,8 +161,10 @@ class DinoV3VitCNNUnet(nn.Module):
         self.dtype = dtype
 
         # --- backbones ---
-        self.vit = AutoModel.from_pretrained(backbone_vit)
-        self.cnn = AutoModel.from_pretrained(backbone_cnn)
+        self.vit = AutoModel.from_pretrained(backbone['vit'])
+        print(f"vit backbone {backbone['vit']} loaded")
+        self.cnn = AutoModel.from_pretrained(backbone['cnn'])
+        print(f"cnn backbone {backbone['cnn']} loaded")
 
         vit_dim = self.vit.config.hidden_size          # e.g. 384 for vits16
         c4, c8, c16, c32 = self.cnn.config.hidden_sizes  # e.g. [96, 192, 384, 768]
@@ -196,7 +197,7 @@ class DinoV3VitCNNUnet(nn.Module):
         self.diam_labels = nn.Parameter(torch.tensor([30.]), requires_grad=False)
         self.diam_mean = nn.Parameter(torch.tensor([30.]), requires_grad=False)
 
-        if freeze_encoder:
+        if freeze_backbone:
             print("encoders are frozen")
             for p in self.vit.parameters():
                 p.requires_grad = False
@@ -343,23 +344,23 @@ class DinoV3CNNOnlyUnet(nn.Module):
     """
     def __init__(
         self,
-        backbone_cnn: Union[str, nn.Module] = "facebook/dinov3-convnext-tiny-pretrain-lvd1689m",
+        backbone=None,
         nout: int = 3,
         decoder_channels: Optional[List[int]] = None,
         freeze_backbone: bool = False,
+        dtype: str = "troch.float32",
     ):
         super().__init__()
 
         # --- backbone の構築 or 受け取り ---
-        if isinstance(backbone_cnn, str):
-            # ここは環境依存なので、プロジェクト側で適宜書き換えてください。
-            # 例: torch.hub や timm, 独自の dinov3 実装など。
-            self.backbone = AutoModel.from_pretrained(backbone_cnn)
-        else:
-            self.backbone = backbone_cnn
+        self.cnn = AutoModel.from_pretrained(backbone['cnn'])
+        print(f"backbone {backbone['cnn']} loaded")
+
+        self.diam_labels = nn.Parameter(torch.tensor([30.]), requires_grad=False)
+        self.diam_mean = nn.Parameter(torch.tensor([30.]), requires_grad=False)
 
         if freeze_backbone:
-            for p in self.backbone.parameters():
+            for p in self.cnn.parameters():
                 p.requires_grad = False
 
         # ConvNeXt Tiny (DINOv3 convnext tiny) を想定した Encoder 側のチャネル数
@@ -372,6 +373,7 @@ class DinoV3CNNOnlyUnet(nn.Module):
         assert len(decoder_channels) == 4, "decoder_channels は4要素のリストで指定してください。"
 
         self.decoder_channels = decoder_channels
+        self.dtype = dtype
 
         # --- U-Net Decoder Blocks ---
         # C3 (768) -> up3 -> uses skip C2 (384) -> 512
@@ -417,8 +419,8 @@ class DinoV3CNNOnlyUnet(nn.Module):
         必要ならこの関数だけ書き換える。
         """
         # 例1: backbone.forward_features(x) が dict を返す場合
-        if hasattr(self.backbone, "forward_features"):
-            feats = self.backbone.forward_features(x)
+        if hasattr(self.cnn, "forward_features"):
+            feats = self.cnn.forward_features(x)
             # 場合分け: dict / list / tuple など
             if isinstance(feats, dict):
                 # ここは実装に応じてキー名を変えてください
@@ -452,7 +454,7 @@ class DinoV3CNNOnlyUnet(nn.Module):
                 )
 
         # 例2: backbone(x) がそのまま特徴リストを返す場合
-        out = self.backbone(x, output_hidden_states=True)
+        out = self.cnn(x, output_hidden_states=True)
         feats = [t for t in out.hidden_states if t.dim() == 4]
         # sort by spatial size descending: H, H/4, H/8, H/16, H/32
         feats = sorted(feats, key=lambda f: f.shape[2], reverse=True)

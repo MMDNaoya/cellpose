@@ -81,6 +81,8 @@ def get_arg_parser():
     model_args.add_argument("--chan2_restore", action="store_true", help=
         'Deprecated in v4.0.1+, not used. ')
     model_args.add_argument("--model_name")
+    model_args.add_argument("--backbone_cnn")
+    model_args.add_argument("--backbone_vit")
     model_args.add_argument(
         "--transformer", action="store_true", help=
         "use transformer backbone (pretrained_model from Cellpose3 is transformer_cp3)")
@@ -208,7 +210,7 @@ def get_arg_parser():
         "pick one of training images to use as test data."
     )
     training_args.add_argument("--fold", type=int, default=0)
-    training_args.add_argument("--learning_rate", default=1e-5, type=float,
+    training_args.add_argument("--learning_rate", default=1e-2, type=float,
                                help="learning rate. Default: %(default)s")
     training_args.add_argument("--weight_decay", default=0.1, type=float,
                                help="weight decay. Default: %(default)s")

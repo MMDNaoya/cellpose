@@ -117,18 +117,20 @@ def main():
     if len(args.image_path) > 0 and args.train:
         raise ValueError("ERROR: cannot train model with single image input")
     weight_path = args.weight_path
+
+    backbone = {"cnn": args.backbone_cnn, "vit": args.backbone_vit} 
     ## Run evaluation on images
     if not args.train:
         _evaluate_cellposemodel_cli(
-            args, logger, image_filter, device, model_name, pretrained_model, normalize, weight_path)
+            args, logger, image_filter, device, model_name, backbone, pretrained_model, normalize, weight_path)
     
     ## Train a model ##
     else:
         _train_cellposemodel_cli(
-            args, logger, image_filter, device, model_name, pretrained_model, normalize, weight_path)
+            args, logger, image_filter, device, model_name, backbone, pretrained_model, normalize, weight_path)
 
 
-def _train_cellposemodel_cli(args, logger, image_filter, device, model_name, pretrained_model, normalize, weight_path):
+def _train_cellposemodel_cli(args, logger, image_filter, device, model_name, backbone, pretrained_model, normalize, weight_path):
     test_dir = None if len(args.test_dir) == 0 else args.test_dir
     images, labels, image_names, train_probs = None, None, None, None
     test_images, test_labels, image_names_test, test_probs = None, None, None, None
@@ -160,7 +162,7 @@ def _train_cellposemodel_cli(args, logger, image_filter, device, model_name, pre
     # initialize model
     freeze_encoder = args.encoder_lr_multiplier <= 0
     model = models.CellposeModel(
-        device=device, model_name=model_name, pretrained_model=pretrained_model,
+        device=device, model_name=model_name, backbone=backbone, pretrained_model=pretrained_model,
         upsampler=args.upsampler,
         use_samneck=args.use_samneck,
         freeze_encoder=freeze_encoder)
@@ -217,7 +219,7 @@ def _train_cellposemodel_cli(args, logger, image_filter, device, model_name, pre
     return model
 
 
-def _evaluate_cellposemodel_cli(args, logger, imf, device, model_name, pretrained_model, normalize, weight_path):
+def _evaluate_cellposemodel_cli(args, logger, imf, device, model_name, backbone, pretrained_model, normalize, weight_path):
     # Check with user if they REALLY mean to run without saving anything
     if not args.train:
         saving_something = args.save_png or args.save_tif or args.save_flows or args.save_txt
@@ -242,7 +244,7 @@ def _evaluate_cellposemodel_cli(args, logger, imf, device, model_name, pretraine
             ">>>> running cellpose on %d images using all channels" % nimg)
 
     # handle built-in model exceptions
-    model = models.CellposeModel(device=device, model_name=model_name, pretrained_model=pretrained_model,)
+    model = models.CellposeModel(device=device, model_name=model_name, backbone=backbone, pretrained_model=pretrained_model,)
     if len(weight_path) > 0:
         model.net.load_state_dict(torch.load(weight_path))
     tqdm_out = utils.TqdmToLogger(logger, level=logging.INFO)

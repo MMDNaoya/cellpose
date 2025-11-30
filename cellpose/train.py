@@ -566,24 +566,32 @@ def train_seg(model, train_data=None, train_labels=None, train_files=None,
             p.requires_grad = False
     wd_encoder = 0 if encoder_lr_multiplier == 0 else 1e-5
     wd_other   = 1e-2
+
+
+    if model_name == "DinoV3VitCNNUnet":
+        encoder_params = list(model.net.vit.parameters()) + list(model.net.cnn.parameters())
+    elif model_name == "DinoV3CNNOnlyUnet":
+        encoder_params = list(model.net.cnn.parameters())
+    elif model_name == "DinoV3Transformer":
+        encoder_params = list(model.net.encoder.parameters())
+    else:
+        raise ValueError(f"invalid model_name {model_name}")
+    encoder_param_ids = {id(p) for p in encoder_params}
     param_groups = [
-        # --- encoder ---
         {
-            "params": [p for p in model.net.encoder.parameters() if p.requires_grad],
+            "params": [p for p in model.net.parameters()
+                    if id(p) in encoder_param_ids and p.requires_grad],
             "lr": learning_rate * encoder_lr_multiplier,
             "weight_decay": wd_encoder,
         },
-
-        # --- その他（SAM Neck, UpSampler, Head など） ---
         {
-            "params": [
-                p for name, p in model.net.named_parameters()
-                if ("encoder" not in name) and p.requires_grad
-            ],
+            "params": [p for p in model.net.parameters()
+                    if id(p) not in encoder_param_ids and p.requires_grad],
             "lr": learning_rate,
             "weight_decay": wd_other,
-        }
+        },
     ]
+
     optimizer = torch.optim.AdamW(param_groups)
 
     t0 = time.time()

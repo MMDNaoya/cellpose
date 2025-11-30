@@ -76,11 +76,11 @@ class SAMNeck(nn.Module):
 
 
 class DinoV3Transformer(nn.Module):
-    def __init__(self, backbone="facebook/dinov3-vitl16-pretrain-lvd1689m",
+    def __init__(self, backbone,
                   ps=8, nout=3, bsize=256, rdrop=0.4,
                   upsampler="simple", use_samneck=True, freeze_encoder=True, dtype=torch.float32):
         super(DinoV3Transformer, self).__init__()
-        assert "dino" in backbone
+        backbone = backbone['vit']
         self.ps = ps
         self.nout = nout
         self.bsize = bsize
@@ -88,6 +88,7 @@ class DinoV3Transformer(nn.Module):
         self.is_convnext = "convnext" in backbone
 
         self.encoder = AutoModel.from_pretrained(backbone)
+        print(f"backbone {backbone} loaded")
         if self.is_convnext:
             nchan = self.encoder.config.hidden_sizes[-1]
         else:
