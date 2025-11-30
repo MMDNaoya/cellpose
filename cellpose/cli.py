@@ -80,6 +80,7 @@ def get_arg_parser():
         'Deprecated in v4.0.1+, not used. ')
     model_args.add_argument("--chan2_restore", action="store_true", help=
         'Deprecated in v4.0.1+, not used. ')
+    model_args.add_argument("--model_name")
     model_args.add_argument(
         "--transformer", action="store_true", help=
         "use transformer backbone (pretrained_model from Cellpose3 is transformer_cp3)")

@@ -17,6 +17,7 @@ models_logger = logging.getLogger(__name__)
 
 from . import transforms, dynamics, utils, plot
 from .vit_sam import Transformer, DinoV3Transformer
+from .dinov3_unet import DinoV3CNNOnlyUnet, DinoV3VitCNNUnet
 from .core import assign_device, run_net, run_3D
 
 _CPSAM_MODEL_URL = "https://huggingface.co/mouseland/cellpose-sam/resolve/main/cpsam"
@@ -88,7 +89,7 @@ class CellposeModel():
 
     """
 
-    def __init__(self, gpu=False, pretrained_model="cpsam", model_type=None, freeze_encoder=True,
+    def __init__(self, gpu=False, model_name="DinoV3Transformer", pretrained_model="cpsam", model_type=None, freeze_encoder=True,
                  use_samneck=True, upsampler="simple", diam_mean=None, device=None, nchan=None, use_bfloat16=True):
         """
         Initialize the CellposeModel.
@@ -134,12 +135,23 @@ class CellposeModel():
 
         self.pretrained_model = pretrained_model
         dtype = torch.bfloat16 if use_bfloat16 else torch.float32
-        if "dino" in pretrained_model:
+
+        if "DinoV3Transformer" == model_name:
             self.net = DinoV3Transformer(
                 backbone=pretrained_model,
                 upsampler=upsampler, use_samneck=use_samneck, 
                 freeze_encoder=freeze_encoder, dtype=dtype).to(self.device)
-        elif pretrained_model == "cpsam":
+        elif "DinoV3VitCNNUnet" == model_name:
+            self.net = DinoV3VitCNNUnet(
+                backbone=pretrained_model,
+                upsampler=upsampler,
+                freeze_encoder=freeze_encoder, dtype=dtype).to(self.device)
+        elif "DinoV3CNNOnlyUnet" == model_name:
+            self.net = DinoV3CNNOnlyUnet(
+                backbone=pretrained_model,
+                upsampler=upsampler,
+                freeze_encoder=freeze_encoder, dtype=dtype).to(self.device)
+        elif "cpsam" == model_name:
             self.net = Transformer(dtype=dtype).to(self.device)
 
         # if os.path.exists(self.pretrained_model):
