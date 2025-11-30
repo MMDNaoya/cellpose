@@ -554,7 +554,7 @@ def train_seg(model, train_data=None, train_labels=None, train_files=None,
     # last 5 epochs: linear decay
     LR = np.ones(n_epochs) * learning_rate
     LR[:5] = np.linspace(learning_rate*0.01, learning_rate, 5)
-    LR[-5:] = np.linspace(learning_rate, learning_rate*0.01)
+    LR[-5:] = np.linspace(learning_rate, learning_rate*0.01, 5)
 
     train_logger.info(f">>> n_epochs={n_epochs}, n_train={nimg}, n_test={nimg_test}")
     train_logger.info(
